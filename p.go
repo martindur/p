@@ -14,6 +14,7 @@ import (
 type P struct {
 	projectsDir string
     openCmd string
+    openFromProject bool
 }
 
 func getProjects(rootDir string) []string {
@@ -33,6 +34,10 @@ func getProjects(rootDir string) []string {
     return projects
 }
 
+func resolveOpen(cmd string, project string) string {
+    return strings.ReplaceAll(cmd, "${PROJECT}", project)
+}
+
 func (p *P) ls() {
     projects := getProjects(p.projectsDir)
 
@@ -50,18 +55,30 @@ func (p *P) new(name string) {
 
 func (p *P) open(name string) {
     project := filepath.Join(p.projectsDir, name)
-    err := os.Chdir(project)
 
-    if err != nil {
-        fmt.Printf("Could not change to project directory. Error: %v", err)
-    }
-
-    cmdToRun := "vim"
+    var argsToRun []string
+    var err error
     if p.openCmd != "" {
-        cmdToRun = p.openCmd
+        argsToRun = strings.Split(resolveOpen(p.openCmd, project), " ")
+    } else {
+        argsToRun = append(argsToRun, "vim")
     }
 
-    cmd := exec.Command(cmdToRun)
+    if p.openFromProject {
+        err = os.Chdir(project)
+        if err != nil {
+            fmt.Printf("Could not change to project directory. Error: %v", err)
+            return
+        }
+    }
+
+    // First arg is 'some' named executable. The rest are unpacked as arguments
+    var cmd *exec.Cmd
+    if len(argsToRun) > 1 {
+        cmd = exec.Command(argsToRun[0], argsToRun[1:]...)
+    } else {
+        cmd = exec.Command(argsToRun[0])
+    }
     cmd.Stdin = os.Stdin
     cmd.Stdout = os.Stdout
 
@@ -99,14 +116,18 @@ func readConfig(p *P) {
                     }
                 }
 
-                p.openCmd = conf[1]
+                p.openCmd = strings.ReplaceAll(conf[1], "\"", "")
+            } else if conf[0] == "open_from_project" {
+                if conf[1] == "true" {
+                    p.openFromProject = true
+                }
             }
 		}
 	}
 }
 
 func main() {
-	p := P{}
+    p := P{projectsDir: "", openCmd: "", openFromProject: false}
 	readConfig(&p)
 	numArgs := len(os.Args[1:])
     args := os.Args[1:]
