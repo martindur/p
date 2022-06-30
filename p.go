@@ -15,7 +15,19 @@ type P struct {
 	projectsDir string
     openCmd string
     openFromProject bool
+    git bool
+    readme bool
 }
+
+// func createPattern(pattern string) {
+//     switch pattern {
+//     case ".git":
+//         cmd := exec.Command("git", "init")
+//         cmd.Run()
+//     case ".gitignore":
+//         os.NewFile
+//     }
+// }
 
 func getProjects(rootDir string) []string {
 	files, err := ioutil.ReadDir(rootDir)
@@ -46,11 +58,42 @@ func (p *P) ls() {
     }
 }
 
-func (p *P) new(name string) {
+func (p *P) new(name string) error {
     path := filepath.Join(p.projectsDir, name)
     if err := os.Mkdir(path, os.ModePerm); err != nil {
-        fmt.Printf("Could not create project directory! %v", err)
+        return err
     }
+
+    curDir, err := os.Getwd()
+
+    if p.git {
+        if err != nil {
+            return err
+        }
+
+        err = os.Chdir(path)
+        if err != nil {
+            return err
+        }
+
+        cmd := exec.Command("git", "init")
+        cmd.Run()
+
+        err = os.Chdir(curDir)
+        if err != nil {
+            return err
+        }
+    }
+
+    if p.readme {
+        readmeFilePath := filepath.Join(p.projectsDir, name, "readme.md")
+        _, err := os.Create(readmeFilePath)
+        if err != nil {
+            return err
+        }
+    }
+
+    return nil
 }
 
 func (p *P) open(name string) {
@@ -67,7 +110,7 @@ func (p *P) open(name string) {
     if p.openFromProject {
         err = os.Chdir(project)
         if err != nil {
-            fmt.Printf("Could not change to project directory. Error: %v", err)
+            fmt.Printf("Could not change to project directory. Error: %e", err)
             return
         }
     }
@@ -103,10 +146,11 @@ func readConfig(p *P) {
 	for scanner.Scan() {
 		if len(scanner.Text()) == 0 || scanner.Text()[0:1] != "#" { // Ignore comments
 			conf := strings.Split(scanner.Text(), "=")
-			if conf[0] == "projects" {
-				p.projectsDir = conf[1]
-			} else if conf[0] == "open" {
 
+            switch conf[0] {
+            case "projects":
+                p.projectsDir = conf[1]
+            case "open":
                 if strings.Contains(conf[1], "${projects}") {
                     // Make sure the projects setting is set, when referenced in 'open' setting.
                     if p.projectsDir == "" {
@@ -115,19 +159,48 @@ func readConfig(p *P) {
                         return
                     }
                 }
-
                 p.openCmd = strings.ReplaceAll(conf[1], "\"", "")
-            } else if conf[0] == "open_from_project" {
+            case "open_from_project":
                 if conf[1] == "true" {
                     p.openFromProject = true
+                } else if conf[1] == "false" {
+                    p.openFromProject = false
+                } else {
+                    fmt.Println("Failed to read config! the 'open_from_project' setting only supports the values 'true' and 'false'")
+                }
+            case "git":
+                if conf[1] == "true" {
+                    p.git = true
+                } else if conf[1] == "false" {
+                    p.git = false
+                } else {
+                    fmt.Println("Failed to read config! the 'git' setting only supports the values 'true' and 'false'")
+                }
+            case "readme":
+                if conf[1] == "true" {
+                    p.readme = true
+                } else if conf[1] == "false" {
+                    p.readme = false
+                } else {
+                    fmt.Println("Failed to read config! the 'readme' setting only supports the values 'true' and 'false'")
                 }
             }
 		}
 	}
 }
 
+func contains(s []string, e string) bool {
+    for _, a := range s {
+        if a == e {
+            return true
+        }
+    }
+    return false
+}
+
+
 func main() {
-    p := P{projectsDir: "", openCmd: "", openFromProject: false}
+    p := P{projectsDir: "", openCmd: "", openFromProject: false, git: false, readme: false}
 	readConfig(&p)
 	numArgs := len(os.Args[1:])
     args := os.Args[1:]
@@ -145,7 +218,10 @@ func main() {
             fmt.Println("'new' command requires a project name")
             return
         }
-        p.new(args[1])
+        err := p.new(args[1])
+        if err != nil {
+            fmt.Printf("Could not create new project! %e", err)
+        }
     case "open":
         if numArgs < 2 {
             fmt.Println("'open' command requires a project name")
@@ -153,6 +229,9 @@ func main() {
         }
         p.open(args[1])
     default:
+        if contains(getProjects(p.projectsDir), args[0]) {
+            p.open(args[0])
+        }
         fmt.Printf("'%v' command not supported\n", args[0])
     }
 }
