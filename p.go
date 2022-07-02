@@ -203,7 +203,7 @@ func readConfig(p *P) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	file, err := os.Open(dirname + "/.config/p.conf")
+	file, err := os.Open(dirname + "/.config/p/p.conf")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -313,14 +313,22 @@ func main() {
             return
         }
         p.open(args[1])
-    // As of now, there's no elegant way of changing shell directory, e.g.
-    // 'Chicken and egg' problem. The shell executes a program that wants to run something in the shell that executed the program
-    // case "cd":
-    //     p.cd(args[1])
+    // Mainly used by p.sh for navigating projects
+    case "_getprojectpath":
+        project := p.getProject(args[1])
+        fmt.Print(project)
+    // Mainly used by p.sh for fetching projects root
+    case "_getppath":
+        fmt.Print(p.projectsDir)
     default:
-        if contains(getProjects(p.projectsDir, false), args[0]) {
+        project := p.getProject(args[0])
+        // if contains(getProjects(p.projectsDir, false), args[0]) {
+        //     p.open(args[0])
+        // }
+        if project != "" {
             p.open(args[0])
+        } else {
+            fmt.Printf("'%v' command not supported\n", args[0])
         }
-        fmt.Printf("'%v' command not supported\n", args[0])
     }
 }
