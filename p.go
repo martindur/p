@@ -3,7 +3,8 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"io/ioutil"
+	"io/fs"
+
 	"log"
 	"os"
 	"os/exec"
@@ -29,21 +30,71 @@ type P struct {
 //     }
 // }
 
-func getProjects(rootDir string) []string {
-	files, err := ioutil.ReadDir(rootDir)
+func splitPath(path string) []string {
+    // Path splitting that supports trailing slashes (e.g. remove empty strings)
+    // Might want to support OS specific path separators
+    splitStrings := strings.Split(path, "/")
+    var validStrings []string
+    for _, str := range splitStrings {
+        if str != "" {
+            validStrings = append(splitStrings, str)
+        }
+    }
+
+    return validStrings
+}
+
+
+func getProjects(rootDir string, git bool) []string {
     var projects []string
 
-	if err != nil {
-		log.Fatal(err)
-	}
+    if !git {
+        // If git is not required, the function returns folder names, not the complete path
+        // This is because without git, projects are just nested as project subdirectories
+        files, err := os.ReadDir(rootDir)
+	    if err != nil {
+		    log.Fatal(err)
+	    }
 
-	for _, file := range files {
-		if file.IsDir() {
-            projects = append(projects, file.Name())
-		}
-	}
+        for _, file := range files {
+            if file.IsDir() {
+                projects = append(projects, file.Name())
+            }
+        }
 
-    return projects
+        return projects
+    }
+
+    // With git support, we traverse directories looking for '.git' dirs
+    err := filepath.WalkDir(rootDir, func(path string, info fs.DirEntry, err error) error {
+        if info.IsDir() && info.Name() == ".git" {
+            projectDir, _ := filepath.Split(path)
+            projects = append(projects, projectDir)
+        }
+        return nil
+    })
+
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // There might be thirdparty dirs, or other reasons to have nested .git dirs,
+    // So we make sure to filter out any "nested projects". This means that
+    // submodules are not supported (as of now)
+    var cleanedProjects []string
+    cleanedProjects = append(cleanedProjects, projects...)
+
+    for _, project := range projects {
+        for i, projectPath := range projects {
+            if strings.Contains(projectPath, project) && projectPath != project {
+                if contains(cleanedProjects, projectPath) {
+                    cleanedProjects = remove(cleanedProjects, i)
+                }
+            }
+        }
+    }
+
+    return cleanedProjects
 }
 
 func resolveOpen(cmd string, project string) string {
@@ -51,9 +102,13 @@ func resolveOpen(cmd string, project string) string {
 }
 
 func (p *P) ls() {
-    projects := getProjects(p.projectsDir)
+    projects := getProjects(p.projectsDir, p.git)
 
     for _, projectName := range projects {
+        if p.git {
+            projectSplit := splitPath(projectName)
+            projectName = projectSplit[len(projectSplit)-1]
+        }
         fmt.Println(projectName)
     }
 }
@@ -198,6 +253,11 @@ func contains(s []string, e string) bool {
     return false
 }
 
+func remove(s []string, i int) []string {
+    s[i] = s[len(s)-1]
+    return s[:len(s)-1]
+}
+
 
 func main() {
     p := P{projectsDir: "", openCmd: "", openFromProject: false, git: false, readme: false}
@@ -229,7 +289,7 @@ func main() {
         }
         p.open(args[1])
     default:
-        if contains(getProjects(p.projectsDir), args[0]) {
+        if contains(getProjects(p.projectsDir, false), args[0]) {
             p.open(args[0])
         }
         fmt.Printf("'%v' command not supported\n", args[0])
