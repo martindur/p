@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"io/fs"
-
 	"log"
 	"os"
 	"os/exec"
@@ -19,16 +18,6 @@ type P struct {
     git bool
     readme bool
 }
-
-// func createPattern(pattern string) {
-//     switch pattern {
-//     case ".git":
-//         cmd := exec.Command("git", "init")
-//         cmd.Run()
-//     case ".gitignore":
-//         os.NewFile
-//     }
-// }
 
 func splitPath(path string) []string {
     // Path splitting that supports trailing slashes (e.g. remove empty strings)
@@ -45,6 +34,10 @@ func splitPath(path string) []string {
 }
 
 
+// Returns a slice of project directories under the rootDir directory
+// if 'git' is true, the full paths will be returned
+// if 'git' is false, only the project names are returned
+// (This is less than idea, but without git, the projects are always only 1 level deep)
 func getProjects(rootDir string, git bool) []string {
     var projects []string
 
@@ -101,6 +94,10 @@ func resolveOpen(cmd string, project string) string {
     return strings.ReplaceAll(cmd, "${PROJECT}", project)
 }
 
+func (p *P) getProject(name string) string {
+    return contained(getProjects(p.projectsDir, p.git), name)
+}
+
 func (p *P) ls() {
     projects := getProjects(p.projectsDir, p.git)
 
@@ -152,7 +149,15 @@ func (p *P) new(name string) error {
 }
 
 func (p *P) open(name string) {
-    project := filepath.Join(p.projectsDir, name)
+    var project string
+
+    if !p.git {
+        // We use a naive approach here, because 'getProjects' does not return
+        // full paths without git set true
+        project = filepath.Join(p.projectsDir, name)
+    } else {
+        project = p.getProject(name)
+    }
 
     var argsToRun []string
     var err error
@@ -163,7 +168,7 @@ func (p *P) open(name string) {
     }
 
     if p.openFromProject {
-        err = os.Chdir(project)
+        err = os.Chdir(project)  // NOTE: this changes the working directory for the 'p' app, but NOT the shell directory for the user
         if err != nil {
             fmt.Printf("Could not change to project directory. Error: %e", err)
             return
@@ -184,6 +189,13 @@ func (p *P) open(name string) {
     if err != nil {
         fmt.Println(err)
     }
+}
+
+// Change current directory to project <name> directory
+// Currently only supported for git projects
+func (p *P) cd(name string) {
+    project := p.getProject(name)
+    os.Chdir(project)
 }
 
 func readConfig(p *P) {
@@ -244,6 +256,7 @@ func readConfig(p *P) {
 	}
 }
 
+// Returns true if string e is found in slice s
 func contains(s []string, e string) bool {
     for _, a := range s {
         if a == e {
@@ -253,6 +266,18 @@ func contains(s []string, e string) bool {
     return false
 }
 
+// Returns a from slice s if e is the last element in a path-split of a
+func contained(s []string, e string) string {
+    for _, a := range s {
+        splitStrings := splitPath(a)
+        if splitStrings[len(splitStrings)-1] == e {
+            return a 
+        }
+    }
+    return ""
+}
+
+// Remove element at index i from slice s and return slice
 func remove(s []string, i int) []string {
     s[i] = s[len(s)-1]
     return s[:len(s)-1]
@@ -288,6 +313,10 @@ func main() {
             return
         }
         p.open(args[1])
+    // As of now, there's no elegant way of changing shell directory, e.g.
+    // 'Chicken and egg' problem. The shell executes a program that wants to run something in the shell that executed the program
+    // case "cd":
+    //     p.cd(args[1])
     default:
         if contains(getProjects(p.projectsDir, false), args[0]) {
             p.open(args[0])
